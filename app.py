@@ -16,7 +16,7 @@ import requests
 from flask import Flask, jsonify, redirect, render_template, request, Response
 
 # ═══════════════════ الإعدادات ═══════════════════
-BOT_TOKEN = "ضع_توكن_البوت_هنا"      # ← من @BotFather
+BOT_TOKEN = "8990437503:AAEbLQn5Pe539tpZb-l47AHoWxMPOakftho"      # ← من @BotFather
 CHAT_ID   = "ضع_معرف_الشات_هنا"      # ← من @userinfobot
 ADMIN_KEY = "غيّر_هذه_الكلمة_السرية"  # ← كلمة مرور لوحة التحكم
 PORT      = 5000
